@@ -16,13 +16,19 @@ A simple LangGraph agent that can search the web using DuckDuckGo, exposed via a
 poetry install
 ```
 
-2. Create a `.env` file from the example:
+2. Install Arize Phoenix (used as a local tracing server):
+
+```bash
+pip3 install arize-phoenix
+```
+
+3. Create a `.env` file from the example:
 
 ```bash
 cp .env.example .env
 ```
 
-3. Add your OpenAI API key to the `.env` file:
+4. Add your OpenAI API key to the `.env` file:
 
 ```
 OPENAI_API_KEY=your_actual_api_key
@@ -30,9 +36,19 @@ OPENAI_API_KEY=your_actual_api_key
 
 ## Running the API
 
-Start the FastAPI server:
+Start Phoenix and the agent together:
 
 ```bash
+./start.sh
+```
+
+Or start them individually:
+
+```bash
+# Terminal 1 — Phoenix UI at http://localhost:6006
+python3 -m phoenix.server.main serve
+
+# Terminal 2 — Agent API at http://localhost:8000
 poetry run uvicorn api:app --reload
 ```
 

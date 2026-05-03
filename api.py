@@ -1,4 +1,7 @@
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
@@ -6,7 +9,6 @@ from pydantic import BaseModel
 from agent import build_agent
 from database import get_itinerary, init_db
 
-load_dotenv()
 init_db()
 
 agent = build_agent()

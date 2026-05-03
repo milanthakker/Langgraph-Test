@@ -1,4 +1,5 @@
 import operator
+import os
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -6,11 +7,19 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_core.messages import AnyMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from phoenix.otel import register
 from typing_extensions import TypedDict
 
 from tools import build_itinerary, get_past_itineraries
 
 load_dotenv()
+
+tracer_provider = register(
+    project_name=os.getenv("PHOENIX_PROJECT_NAME", "travel-agent"),
+    endpoint="http://localhost:6006/v1/traces",
+)
+LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 
 search_tool = DuckDuckGoSearchRun()
 tools = [search_tool, build_itinerary, get_past_itineraries]
@@ -39,7 +48,7 @@ def llm_call(state: MessagesState) -> dict:
                             "If they give vague interests, ask a follow-up to get specifics — for example, if they say 'culture', "
                             "ask whether they prefer museums, architecture, live music, or street art. "
                             "Once you have destination, duration, and clear interests, call build_itinerary. "
-                            "Use the search tool for current information about destinations, flights, hotels, or attractions."
+                            "Use the search tool to get information about the current weather, and real-time news about the destination."
                         )
                     )
                 ]
