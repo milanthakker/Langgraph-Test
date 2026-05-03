@@ -8,10 +8,12 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
+from tools import build_itinerary, get_past_itineraries
+
 load_dotenv()
 
 search_tool = DuckDuckGoSearchRun()
-tools = [search_tool]
+tools = [search_tool, build_itinerary, get_past_itineraries]
 tools_by_name = {tool.name: tool for tool in tools}
 
 model = ChatOpenAI(model="gpt-4o", temperature=0)
@@ -29,8 +31,16 @@ def llm_call(state: MessagesState) -> dict:
             model_with_tools.invoke(
                 [
                     SystemMessage(
-                        content="You are a helpful assistant that can search the web to answer questions. "
-                        "Use the search tool when you need current information."
+                        content=(
+                            "You are a precise and helpful travel assistant. "
+                            "When a user asks to plan a trip or vacation, do NOT call build_itinerary immediately. "
+                            "First, ask for any missing details in a single message: destination, number of days, "
+                            "and their interests or what they want to focus on each day (e.g. food, history, art, adventure, nature, architecture). "
+                            "If they give vague interests, ask a follow-up to get specifics — for example, if they say 'culture', "
+                            "ask whether they prefer museums, architecture, live music, or street art. "
+                            "Once you have destination, duration, and clear interests, call build_itinerary. "
+                            "Use the search tool for current information about destinations, flights, hotels, or attractions."
+                        )
                     )
                 ]
                 + state["messages"]
