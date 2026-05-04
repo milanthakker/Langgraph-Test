@@ -18,6 +18,7 @@ load_dotenv()
 tracer_provider = register(
     project_name=os.getenv("PHOENIX_PROJECT_NAME", "travel-agent"),
     endpoint="http://localhost:6006/v1/traces",
+    batch=True,
 )
 LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
 
