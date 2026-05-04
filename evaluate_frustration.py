@@ -78,7 +78,7 @@ Respond with one of: frustrated / not_frustrated
 """
 
 llm_itinerary_eval = llm_classify(
-    dataframe=llm_spans,
+    dataframe=llm_spans["itinerary_tool_called"],
     template=ITINERARY_LLM_TEMPLATE,
     model=model,
     rails=["frustrated", "not_frustrated"],
@@ -87,7 +87,7 @@ llm_itinerary_eval = llm_classify(
 llm_itinerary_eval.index = llm_spans["context.span_id"]
 
 llm_search_eval = llm_classify(
-    dataframe=llm_spans,
+    dataframe=llm_spans["search_tool_called"],
     template=SEARCH_LLM_TEMPLATE,
     model=model,
     rails=["frustrated", "not_frustrated"],
@@ -114,8 +114,7 @@ other_tool_spans = tool_spans[
 
 ITINERARY_TOOL_TEMPLATE = """
 You are evaluating a travel assistant's tool usage. The `build_itinerary` tool was invoked.
-Determine whether the tool was called appropriately — i.e. the user had clearly requested
-an itinerary and provided sufficient details.
+Determine whether the tool was called appropriately — i.e. the user was looking for an itinerary or plan for their vacation.
 
 Tool name: {tool_name}
 Tool input: {input}

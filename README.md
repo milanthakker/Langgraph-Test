@@ -16,13 +16,7 @@ A simple LangGraph agent that can search the web using DuckDuckGo, exposed via a
 poetry install
 ```
 
-2. Install Arize Phoenix (used as a local tracing server):
-
-```bash
-pip3 install arize-phoenix
-```
-
-3. Create a `.env` file from the example:
+2. Create a `.env` file from the example:
 
 ```bash
 cp .env.example .env
@@ -46,7 +40,7 @@ Or start them individually:
 
 ```bash
 # Terminal 1 — Phoenix UI at http://localhost:6006
-python3 -m phoenix.server.main serve
+poetry run phoenix serve
 
 # Terminal 2 — Agent API at http://localhost:8000
 poetry run uvicorn api:app --reload

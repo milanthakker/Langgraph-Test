@@ -2,7 +2,7 @@
 set -e
 
 echo "Starting Phoenix..."
-python3 -m phoenix.server.main serve &
+poetry run phoenix serve &
 PHOENIX_PID=$!
 
 # Give Phoenix a moment to bind its port before the agent tries to export traces
