@@ -22,7 +22,7 @@ poetry install
 cp .env.example .env
 ```
 
-4. Add your OpenAI API key to the `.env` file:
+3. Add your OpenAI API key to the `.env` file:
 
 ```
 OPENAI_API_KEY=your_actual_api_key
@@ -47,6 +47,16 @@ poetry run uvicorn api:app --reload
 ```
 
 The API will be available at `http://localhost:8000`.
+
+### Interactive CLI chat
+
+To chat with the agent directly in your terminal (without the API):
+
+```bash
+poetry run python chat.py
+```
+
+Type your message and press Enter. Type `quit` or `exit` to end the session.
 
 ## API Endpoints
 
@@ -78,6 +88,31 @@ Health check endpoint.
 curl http://localhost:8000/health
 ```
 
+
+## Observability
+
+Traces are captured automatically via Arize Phoenix whenever the agent or chat script is running. The Phoenix UI is available at `http://localhost:6006`.
+
+### Export spans to CSV
+
+```bash
+poetry run python export_spans.py
+```
+
+Writes all spans to a timestamped CSV file: `spanexport_<project>_<datetime>.csv`.
+
+### Run frustration evaluations
+
+```bash
+poetry run python evaluate_frustration.py
+```
+
+Runs two LLM-as-judge evaluations across all captured spans:
+
+- **Itinerary frustration** — detects when a user asked for an itinerary but the agent asked clarifying questions instead of building one.
+- **Search frustration** — detects when a user asked for real-time information but the agent responded from its own knowledge instead of searching.
+
+Results are printed to the terminal and logged back to Phoenix as named evaluations on each span.
 
 ## Project Structure
 
