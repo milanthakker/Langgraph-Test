@@ -5,16 +5,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pandas as pd
-import phoenix as px
+from phoenix.client import Client
 from phoenix.evals import OpenAIModel, llm_classify
-from phoenix.trace.span_evaluations import SpanEvaluations
 from phoenix.evals.models import set_verbosity
 
 set_verbosity(False)
 
 PROJECT = os.getenv("PHOENIX_PROJECT_NAME", "travel-agent")
-client = px.Client(endpoint="http://localhost:6006")
-spans = client.get_spans_dataframe(project_name=PROJECT)
+client = Client(base_url="http://localhost:6006")
+spans = client.spans.get_spans_dataframe(project_name=PROJECT)
 
 # Build sets of trace IDs by tool usage
 traces_with_itinerary = set(
@@ -29,13 +28,14 @@ traces_with_search = set(
         (spans["attributes.tool.name"].str.contains("search", case=False, na=False))
     ]["context.trace_id"]
 )
-traces_with_any_tool = set(spans[spans["span_kind"] == "TOOL"]["context.trace_id"])
-traces_with_no_tools = set(spans["context.trace_id"]) - traces_with_any_tool
 
 model = OpenAIModel(model="gpt-4o", temperature=0)
 
 # =============================================================================
 # LLM SPAN EVALUATIONS
+# Only evaluate spans in traces where the relevant tool was NOT called —
+# those are the only traces where LLM-level frustration can exist.
+# Traces where the tool fired are defaulted to not_frustrated below.
 # =============================================================================
 
 llm_spans = spans[spans["span_kind"] == "LLM"].copy()
@@ -43,9 +43,12 @@ llm_spans = llm_spans.rename(columns={
     "attributes.input.value": "input",
     "attributes.output.value": "output",
 })
-llm_spans["itinerary_tool_called"] = llm_spans["context.trace_id"].isin(traces_with_itinerary)
-llm_spans["search_tool_called"] = llm_spans["context.trace_id"].isin(traces_with_search)
-llm_spans["no_tools_called"] = llm_spans["context.trace_id"].isin(traces_with_no_tools)
+
+llm_no_itinerary = llm_spans[~llm_spans["context.trace_id"].isin(traces_with_itinerary)]
+llm_with_itinerary = llm_spans[llm_spans["context.trace_id"].isin(traces_with_itinerary)]
+
+llm_no_search = llm_spans[~llm_spans["context.trace_id"].isin(traces_with_search)]
+llm_with_search = llm_spans[llm_spans["context.trace_id"].isin(traces_with_search)]
 
 ITINERARY_LLM_TEMPLATE = """
 You are evaluating a travel assistant. Given the user input and assistant response below,
@@ -56,7 +59,6 @@ instead of building the itinerary when the user clearly wanted one, that is a fr
 
 User input: {input}
 Assistant response: {output}
-Itinerary tool was called in this trace: {itinerary_tool_called}
 
 Was the user frustrated because they asked for an itinerary but didn't get one?
 Respond with one of: frustrated / not_frustrated
@@ -70,7 +72,6 @@ training knowledge instead of using a search tool.
 
 User input: {input}
 Assistant response: {output}
-Search tool was called in this trace: {search_tool_called}
 
 Was the user frustrated because they asked for real-time information but the assistant
 responded from its own knowledge without searching?
@@ -78,22 +79,22 @@ Respond with one of: frustrated / not_frustrated
 """
 
 llm_itinerary_eval = llm_classify(
-    dataframe=llm_spans["itinerary_tool_called"],
+    dataframe=llm_no_itinerary,
     template=ITINERARY_LLM_TEMPLATE,
     model=model,
     rails=["frustrated", "not_frustrated"],
     provide_explanation=True,
 )
-llm_itinerary_eval.index = llm_spans["context.span_id"]
+llm_itinerary_eval.index = llm_no_itinerary["context.span_id"]
 
 llm_search_eval = llm_classify(
-    dataframe=llm_spans["search_tool_called"],
+    dataframe=llm_no_search,
     template=SEARCH_LLM_TEMPLATE,
     model=model,
     rails=["frustrated", "not_frustrated"],
     provide_explanation=True,
 )
-llm_search_eval.index = llm_spans["context.span_id"]
+llm_search_eval.index = llm_no_search["context.span_id"]
 
 # =============================================================================
 # TOOL SPAN EVALUATIONS
@@ -167,31 +168,51 @@ def default_not_frustrated(span_ids):
         index=span_ids,
     )
 
-# Itinerary frustration: LLM + itinerary tool spans evaluated; others default
-itinerary_frames = [
-    llm_itinerary_eval.assign(score=llm_itinerary_eval["label"].map({"frustrated": 0, "not_frustrated": 1})),
-    tool_itinerary_eval.assign(score=tool_itinerary_eval["label"].map({"frustrated": 0, "not_frustrated": 1})),
+def score(eval_df):
+    return eval_df.assign(score=eval_df["label"].map({"frustrated": 0, "not_frustrated": 1}))
+
+# Itinerary frustration:
+#   - LLM spans in traces without build_itinerary → evaluated
+#   - LLM spans in traces WITH build_itinerary → default not_frustrated
+#   - build_itinerary tool spans → evaluated
+#   - search/other tool spans → default not_frustrated
+itinerary_evals = pd.concat([
+    score(llm_itinerary_eval),
+    default_not_frustrated(llm_with_itinerary["context.span_id"]),
+    score(tool_itinerary_eval),
     default_not_frustrated(search_tool_spans["context.span_id"]),
     default_not_frustrated(other_tool_spans["context.span_id"]),
-]
-itinerary_evals = pd.concat(itinerary_frames)
+])
 
-# Search frustration: LLM + search tool spans evaluated; others default
-search_frames = [
-    llm_search_eval.assign(score=llm_search_eval["label"].map({"frustrated": 0, "not_frustrated": 1})),
-    tool_search_eval.assign(score=tool_search_eval["label"].map({"frustrated": 0, "not_frustrated": 1})),
+# Search frustration:
+#   - LLM spans in traces without search → evaluated
+#   - LLM spans in traces WITH search → default not_frustrated
+#   - search tool spans → evaluated
+#   - build_itinerary/other tool spans → default not_frustrated
+search_evals = pd.concat([
+    score(llm_search_eval),
+    default_not_frustrated(llm_with_search["context.span_id"]),
+    score(tool_search_eval),
     default_not_frustrated(itinerary_tool_spans["context.span_id"]),
     default_not_frustrated(other_tool_spans["context.span_id"]),
-]
-search_evals = pd.concat(search_frames)
+])
 
 # =============================================================================
 # LOG EVALUATIONS BACK TO PHOENIX
 # =============================================================================
 
-px.log_evaluations(
-    SpanEvaluations(eval_name="itinerary_frustration", dataframe=itinerary_evals),
-    SpanEvaluations(eval_name="search_frustration", dataframe=search_evals),
+itinerary_evals.index.name = "span_id"
+search_evals.index.name = "span_id"
+
+client.spans.log_span_annotations_dataframe(
+    dataframe=itinerary_evals,
+    annotation_name="itinerary_frustration",
+    annotator_kind="LLM",
+)
+client.spans.log_span_annotations_dataframe(
+    dataframe=search_evals,
+    annotation_name="search_frustration",
+    annotator_kind="LLM",
 )
 print("Evaluations logged to Phoenix.")
 
@@ -200,12 +221,11 @@ print("Evaluations logged to Phoenix.")
 # =============================================================================
 
 print("\n=== Frustration Evaluation Results ===\n")
-print(f"Total spans evaluated:     {len(itinerary_evals)}")
-print(f"  LLM spans:               {len(llm_spans)}")
-print(f"  TOOL spans:              {len(tool_spans)}")
-print(f"  Traces with no tools:    {len(traces_with_no_tools)}")
-print(f"Itinerary frustrations:    {(itinerary_evals['label'] == 'frustrated').sum()}")
-print(f"Search frustrations:       {(search_evals['label'] == 'frustrated').sum()}")
+print(f"LLM spans evaluated (itinerary): {len(llm_no_itinerary)} / {len(llm_spans)}")
+print(f"LLM spans evaluated (search):    {len(llm_no_search)} / {len(llm_spans)}")
+print(f"Tool spans evaluated:            {len(itinerary_tool_spans)} itinerary, {len(search_tool_spans)} search")
+print(f"Itinerary frustrations:          {(itinerary_evals['label'] == 'frustrated').sum()}")
+print(f"Search frustrations:             {(search_evals['label'] == 'frustrated').sum()}")
 
 frustrated_itinerary = itinerary_evals[itinerary_evals["label"] == "frustrated"]
 frustrated_search = search_evals[search_evals["label"] == "frustrated"]
